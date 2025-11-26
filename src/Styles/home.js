@@ -35,7 +35,7 @@ const styles = {
     alignItems: "flex-start",
   },
   filesColumn: {
-    width: 320,
+    width: 420,
     background: "white",
     padding: 12,
     borderRadius: 8,
@@ -55,6 +55,7 @@ const styles = {
     display: "flex",
     alignItems: "center",
     paddingLeft: 6,
+    minHeight: 90,
   },
   tabsContainer: {
     display: "flex",
@@ -85,10 +86,14 @@ const styles = {
     borderRadius: 8,
     boxShadow: "0 1px 2px rgba(16,24,40,0.04)",
     overflow: "hidden",
+    overflowY: "auto",
+    display: "flex",
+    flexDirection: "column",
+    gap: 12,
   },
   sectionTitle: {
     fontWeight: 700,
-    marginBottom: 10,
+    marginBottom: 10
   },
   textInput: {
     width: "100%",
@@ -97,7 +102,14 @@ const styles = {
     border: "1px solid #ddd",
     boxSizing: "border-box",
   },
+  textInputArea: {
+    display: "flex",
+    flexDirection: "column",
+    gap: 8,
+    marginBottom: 12,
+  },
   previewArea: {
+    position: "relative",
     flex: 1,
     display: "flex",
     flexDirection: "column",
@@ -114,11 +126,14 @@ const styles = {
     padding: 16,
     overflow: "auto",
     border: "1px solid #e6eef9",
+    display: "flex",
+    justifyContent: "center",
+    alignItems: "center",
   },
   logo: {
     position: "absolute",
-    bottom: 20,
-    left: 20,
+    top: 10,
+    right: 20,
   },
 };
 

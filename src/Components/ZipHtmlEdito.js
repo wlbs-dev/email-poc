@@ -1,19 +1,39 @@
-import React, { useState, useRef } from "react";
+import React, { useState, useRef, useEffect } from "react";
 import JSZip from "jszip";
 import { FaPlus, FaSave, FaDownload, FaTimes, FaRegFileAlt } from "react-icons/fa";
-import styles from "../Styles/home"
+import styles from "../Styles/home";
 
 export default function ZipHtmlEditor() {
     const [zip, setZip] = useState(null);
     const [htmlFiles, setHtmlFiles] = useState([]);
     const [selectedFile, setSelectedFile] = useState(null);
 
-    // tabs: [{ id, name, doc, textNodes, previewHtml }]
     const [tabs, setTabs] = useState([]);
     const [activeIdx, setActiveIdx] = useState(null);
 
-    const rawHtmlRef = useRef(""); // original HTML text (from loaded file)
-    const imageMap = useRef({}); // map path -> blob url for preview
+    const rawHtmlRef = useRef("");
+    const imageMap = useRef({});
+
+    // ------------------ MODALS ------------------
+    const [showInputModal, setShowInputModal] = useState(false);
+    const [showAlertModal, setShowAlertModal] = useState(false);
+
+    const [inputValue, setInputValue] = useState("");
+    const [alertMessage, setAlertMessage] = useState("");
+
+    const openInputModal = () => {
+        setInputValue("");
+        setShowInputModal(true);
+    };
+
+    const closeInputModal = () => setShowInputModal(false);
+
+    const openAlert = (msg) => {
+        setAlertMessage(msg);
+        setShowAlertModal(true);
+    };
+
+    const closeAlert = () => setShowAlertModal(false);
 
     // ------------------ 1. Upload ZIP ------------------
     const handleUpload = async (e) => {
@@ -41,16 +61,19 @@ export default function ZipHtmlEditor() {
         await Promise.all(imagePromises);
         imageMap.current = imgMap;
         setHtmlFiles(foundHtml);
-        // reset selection/tabs
+
         setSelectedFile(null);
         rawHtmlRef.current = "";
         setTabs([]);
         setActiveIdx(null);
+
+        openAlert("ZIP Loaded Successfully, Please select an HTML file to begin.");
     };
 
-    // ------------------ 2. Load HTML (store rawHtml, prepare base doc for cloning) ------------------
+    // ------------------ 2. Load HTML ------------------
     const loadHtml = async (fileName) => {
         if (!zip) return;
+
         const fileRef = zip.file(fileName);
         if (!fileRef) return;
 
@@ -58,24 +81,58 @@ export default function ZipHtmlEditor() {
         rawHtmlRef.current = html;
         setSelectedFile(fileName);
 
-        // clear existing tabs when user loads a different file
         setTabs([]);
         setActiveIdx(null);
+
+        openAlert(`<div style="
+    background: #f8faff;
+    border: 1px solid #d8e6ff;
+    padding: 16px 20px;
+    border-radius: 10px;
+    font-size: 15px;
+    line-height: 1.5;
+    color: #234;
+    box-shadow: 0 2px 6px rgba(0,0,0,0.05);
+">
+    <div style="
+        font-weight: 600;
+        margin-bottom: 6px;
+        color: #1e88ff;
+        font-size: 16px;
+    ">
+        Loaded HTML File
+    </div>
+
+    <div style="margin-bottom: 8px;">
+        <strong style="color: #333;">${fileName.split("/").pop()}</strong>
+    </div>
+
+    <div style="color: #555;">
+        Create tabs to edit text content.
+    </div>
+</div>`);
     };
 
-    // ------------------ 3. Create Tab (clone original HTML + apply image preview logic exactly) ------------------
+    // ------------------ 3. Create Tab ------------------
     const createTab = () => {
         if (!selectedFile) {
-            alert("Load an HTML file first (click one from HTML Files).");
+            openAlert("Load an HTML file first.");
             return;
         }
-        const name = prompt("Enter tab name:", `Tab ${tabs.length + 1}`);
-        if (!name) return;
+        openInputModal(); // open modal instead of prompt
+    };
+
+    const confirmCreateTab = () => {
+        const name = inputValue.trim();
+        if (!name) {
+            openAlert("Tab name cannot be empty.");
+            return;
+        }
+        closeInputModal();
 
         const parser = new DOMParser();
         const doc = parser.parseFromString(rawHtmlRef.current, "text/html");
 
-        // Fix image preview (preserve exact logic: store original src in data-original-src, then substitute blob URL for preview only)
         const htmlDir = selectedFile.split("/").slice(0, -1).join("/");
 
         doc.querySelectorAll("img").forEach((img) => {
@@ -98,22 +155,25 @@ export default function ZipHtmlEditor() {
             }
 
             if (imageMap.current[normalized]) {
-                img.src = imageMap.current[normalized]; // preview blob only
+                img.src = imageMap.current[normalized];
             }
         });
 
-        // Extract text nodes (same method you used)
         const extracted = [];
         let idCounter = 1;
+
         const walker = document.createTreeWalker(
             doc.body,
             NodeFilter.SHOW_TEXT,
             {
                 acceptNode(node) {
-                    return node.textContent.trim().length ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT;
+                    return node.textContent.trim().length
+                        ? NodeFilter.FILTER_ACCEPT
+                        : NodeFilter.FILTER_REJECT;
                 },
             }
         );
+
         let node;
         while ((node = walker.nextNode())) {
             extracted.push({
@@ -133,28 +193,26 @@ export default function ZipHtmlEditor() {
         };
 
         setTabs((prev) => [...prev, newTab]);
-        setActiveIdx((prev) => {
-            const idx = tabs.length; // new tab will be at end
-            return idx;
-        });
+        setActiveIdx(tabs.length);
+
+        openAlert(`Tab "${name}" created, you can now edit the text content.`);
     };
 
-    // ------------------ 4. Update text in active tab ------------------
+    // ------------------ 4. Update Text ------------------
     const updateText = (tabIndex, textId, newValue) => {
         setTabs((prevTabs) => {
             const copy = prevTabs.map((t) => ({ ...t }));
             const tab = copy[tabIndex];
             if (!tab) return prevTabs;
 
-            tab.textNodes = tab.textNodes.map((item) => (item.id === textId ? { ...item, updated: newValue } : item));
+            tab.textNodes = tab.textNodes.map((item) =>
+                item.id === textId ? { ...item, updated: newValue } : item
+            );
 
-            // update DOM nodeRefs in tab.doc
             tab.textNodes.forEach((item) => {
                 try {
                     item.nodeRef.textContent = item.updated;
-                } catch (e) {
-                    // if nodeRef is stale for some reason, ignore
-                }
+                } catch { }
             });
 
             tab.previewHtml = tab.doc.body.innerHTML;
@@ -162,34 +220,30 @@ export default function ZipHtmlEditor() {
         });
     };
 
-    // ------------------ 5. Save one tab into in-memory zip (restore images before writing) ------------------
+    // ------------------ 5. Save Tab ------------------
     const saveTabToZip = (idx) => {
         if (!zip) return;
 
         const tab = tabs[idx];
         if (!tab) return;
 
-        // Update text
-        tab.textNodes.forEach(t => {
-            try { t.nodeRef.textContent = t.updated; } catch { }
+        tab.textNodes.forEach((t) => {
+            try {
+                t.nodeRef.textContent = t.updated;
+            } catch { }
         });
 
-        // Restore original image src before saving
         tab.doc.querySelectorAll("img").forEach((img) => {
             if (img.dataset.originalSrc) img.src = img.dataset.originalSrc;
         });
 
-        // Save HTML into zip
         const finalHtml = tab.doc.documentElement.outerHTML;
         zip.file(selectedFile, finalHtml);
 
-        // 🔥 Important: restore blob preview for UI
         restorePreviewImages(tab);
 
-        setTabs([...tabs]); // update state
-        alert(`Saved tab "${tab.name}"`);
+        setTabs([...tabs]);
     };
-
 
     const restorePreviewImages = (tab) => {
         const htmlDir = selectedFile.split("/").slice(0, -1).join("/");
@@ -198,7 +252,6 @@ export default function ZipHtmlEditor() {
             const originalSrc = img.dataset.originalSrc;
             if (!originalSrc) return;
 
-            // rebuild normalized path
             let normalized = originalSrc.replace(/^\.\//, "");
             if (htmlDir) {
                 const combined = htmlDir + "/" + normalized;
@@ -211,7 +264,6 @@ export default function ZipHtmlEditor() {
                 normalized = clean.join("/");
             }
 
-            // restore Blob preview URL
             if (imageMap.current[normalized]) {
                 img.src = imageMap.current[normalized];
             }
@@ -220,30 +272,29 @@ export default function ZipHtmlEditor() {
         tab.previewHtml = tab.doc.body.innerHTML;
     };
 
-
-    // ------------------ 6. Export only active tab (download ZIP with that tab's HTML) ------------------
+    // ------------------ 6. Export Tab ------------------
     const exportActiveTab = async (idx) => {
         if (!zip) {
-            alert("No ZIP loaded.");
+            openAlert("No ZIP loaded.");
             return;
         }
+
         const tab = tabs[idx];
         if (!tab) return;
 
-        // Save into zip first (restores original image src before writing)
         saveTabToZip(idx);
 
-        // generate blob and download
         const blob = await zip.generateAsync({ type: "blob" });
+
         const a = document.createElement("a");
         a.href = URL.createObjectURL(blob);
-        // sanitize filename
+
         const safeName = tab.name.replace(/\s+/g, "_").replace(/[^\w\-_.]/g, "");
         a.download = `${safeName}.zip`;
         a.click();
     };
 
-    // ------------------ 7. Close tab ------------------
+    // ------------------ 7. Close Tab ------------------
     const closeTab = (idx, e) => {
         e?.stopPropagation();
         setTabs((prev) => {
@@ -256,7 +307,6 @@ export default function ZipHtmlEditor() {
             if (prevIdx === null) return null;
             if (idx < prevIdx) return prevIdx - 1;
             if (idx === prevIdx) {
-                // pick previous tab if exists, else next, else null
                 const newCount = Math.max(0, tabs.length - 1);
                 if (newCount === 0) return null;
                 if (idx - 1 >= 0) return idx - 1;
@@ -266,143 +316,298 @@ export default function ZipHtmlEditor() {
         });
     };
 
-    // small helper to render sanitized text preview (no change to user's logic)
     const activeTabObj = activeIdx !== null && tabs[activeIdx] ? tabs[activeIdx] : null;
 
-    // ---------- UI ----------
+    useEffect(() => {
+        if (!activeTabObj) return;
+
+        const box = document.querySelector(".previewBoxRef");
+        const content = document.getElementById("scaledPreview");
+        if (!box || !content) return;
+
+        // Force browser to render before measuring
+        requestAnimationFrame(() => {
+            const boxW = box.clientWidth;
+            const boxH = box.clientHeight;
+            const contentW = content.scrollWidth;
+            const contentH = content.scrollHeight;
+
+            const scale = Math.min(boxW / contentW, boxH / contentH, 1);
+
+            content.style.transform = `scale(${scale})`;
+        });
+    }, [activeTabObj]);
+
+
+    // ------------------ UI ------------------
     return (
         <div style={styles.container}>
+
+            {/* CUSTOM MODALS */}
+            {showInputModal && (
+                <div style={modalOverlay}>
+                    <div style={modalBox}>
+                        <div style={modalHeader}>
+                            <h3 style={{ margin: 0, fontSize: 20 }}>Create New Tab</h3>
+                            <FaTimes style={modalClose} onClick={closeInputModal} />
+                        </div>
+
+                        <div style={modalBody}>
+                            <label style={modalLabel}>Tab Name</label>
+                            <input
+                                style={modalInput}
+                                value={inputValue}
+                                onChange={(e) => setInputValue(e.target.value)}
+                                placeholder="Enter a descriptive tab name"
+                            />
+                        </div>
+
+                        <div style={modalFooter}>
+                            <button style={modalBtnSecondary} onClick={closeInputModal}>Cancel</button>
+                            <button style={modalBtnPrimary} onClick={confirmCreateTab}>Create</button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+
+            {(showAlertModal) && (
+                <div style={modalOverlay}>
+                    <div style={modalBox}>
+                        <div style={modalHeader}>
+                            <FaTimes style={modalClose} onClick={closeAlert} />
+                        </div>
+
+                        <div style={{ textAlign: "center", margin: "40px", fontSize: "20px" }} dangerouslySetInnerHTML={{ __html: alertMessage }} />
+
+                        <div style={modalFooter}>
+                            <button style={modalBtnPrimaryAlert} onClick={closeAlert}>OK</button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Rest of YOUR UI (unchanged) */}
             <div style={styles.logo}>
                 <img src="/logo.png" alt="Logo" style={{ height: 140 }} />
             </div>
-            {/* Header */}
-            <div style={styles.header}>
-                <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
-                    <input type="file" accept=".zip" onChange={handleUpload} />
-                    <div style={{ display: "flex", gap: 8 }}>
-                        <button style={styles.primaryBtn} onClick={createTab}>
-                            <FaPlus style={{ marginRight: 8 }} />
-                            Add Tab
-                        </button>
-                    </div>
-                </div>
 
-                <div style={{ marginLeft: "auto", color: "#666" }}>
-                    {selectedFile ? <span>Loaded: <strong>{selectedFile}</strong></span> : <span style={{ fontStyle: "italic" }}>No HTML loaded</span>}
-                </div>
+            <div style={styles.header}>
+                <input type="file" accept=".zip" onChange={handleUpload} />
+                <button style={styles.primaryBtn} onClick={createTab}>
+                    <FaPlus style={{ marginRight: 8 }} /> Add Tab
+                </button>
             </div>
 
-            {/* Files + tabs row */}
             <div style={styles.topRow}>
-                {/* Files list */}
+                {/* File list */}
                 <div style={styles.filesColumn}>
                     <div style={styles.sectionTitle}>HTML Files</div>
-                    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                        {htmlFiles.length === 0 && <div style={{ color: "#777" }}>No HTML files in ZIP</div>}
-                        {htmlFiles.map((f) => (
-                            <div
-                                key={f}
-                                onClick={() => loadHtml(f)}
-                                style={{
-                                    ...styles.fileItem,
-                                    background: selectedFile === f ? "#e6f0ff" : "white",
-                                }}
-                            >
-                                <FaRegFileAlt style={{ marginRight: 8 }} />
-                                <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{f}</span>
-                            </div>
-                        ))}
-                    </div>
+                    {htmlFiles.map((f) => (
+                        <div
+                            key={f}
+                            onClick={() => loadHtml(f)}
+                            style={{
+                                ...styles.fileItem,
+                                background: selectedFile === f ? "#e6f0ff" : "white",
+                            }}
+                        >
+                            <FaRegFileAlt style={{ marginRight: 8 }} />
+                            {f}
+                        </div>
+                    ))}
                 </div>
 
                 {/* Tabs */}
                 <div style={styles.tabsRow}>
-                    {tabs.length === 0 ? (
-                        <div style={{ padding: 12, color: "#666" }}>No tabs yet — create a tab to start editing.</div>
-                    ) : (
-                        <div style={styles.tabsContainer}>
-                            {tabs.map((t, i) => (
-                                <div
-                                    key={t.id}
-                                    onClick={() => setActiveIdx(i)}
-                                    style={{
-                                        ...styles.chromeTab,
-                                        background: activeIdx === i ? "white" : "#f3f6fb",
-                                        borderBottom: activeIdx === i ? "2px solid #1e88ff" : "2px solid transparent",
-                                        color: activeIdx === i ? "#0b63d6" : "#333",
-                                    }}
-                                >
-                                    <span style={{ marginRight: 10 }}>{t.name}</span>
-                                    <FaTimes
-                                        style={{ cursor: "pointer" }}
-                                        onClick={(e) => closeTab(i, e)}
-                                        title="Close tab"
-                                    />
-                                </div>
-                            ))}
+                    {tabs.map((t, i) => (
+                        <div
+                            key={t.id}
+                            onClick={() => setActiveIdx(i)}
+                            style={{
+                                ...styles.chromeTab,
+                                background: activeIdx === i ? "white" : "#f3f6fb",
+                                borderBottom: activeIdx === i ? "2px solid #1e88ff" : "2px solid transparent",
+                            }}
+                        >
+                            <span>{t.name}</span>
+                            <FaTimes
+                                style={{ marginLeft: 8, cursor: "pointer" }}
+                                onClick={(e) => closeTab(i, e)}
+                            />
                         </div>
-                    )}
+                    ))}
                 </div>
             </div>
 
-            {/* Main area: left editor list, right preview */}
             <div style={styles.main}>
-                {/* Editor panel */}
+                {/* Left: Text */}
                 <div style={styles.editor}>
                     <div style={styles.sectionTitle}>Editable Text Content</div>
-                    {!activeTabObj && <div style={{ color: "#777", padding: 12 }}>Select a tab to edit its text</div>}
 
-                    {activeTabObj && (
-                        <div style={{ maxHeight: "72vh", overflowY: "auto", paddingRight: 8 }}>
-                            {activeTabObj.textNodes.map((item) => (
-                                <div key={item.id} style={{ marginBottom: 12 }}>
-                                    <div style={{ fontSize: 13, color: "#444", marginBottom: 6, fontWeight: 600 }}>Original</div>
-                                    <div style={{ marginBottom: 6, color: "#333" }}>{item.original}</div>
-
-                                    <input
-                                        type="text"
-                                        value={item.updated}
-                                        onChange={(e) => updateText(activeIdx, item.id, e.target.value)}
-                                        style={styles.textInput}
-                                    />
-                                </div>
-                            ))}
-                        </div>
-                    )}
+                    {activeTabObj &&
+                        activeTabObj.textNodes.map((item) => (
+                            <div key={item.id} style={styles.textInputArea}>
+                                <div>Original</div>
+                                <div>{item.original}</div>
+                                {item.original.length < 70 ? <input
+                                    type="text"
+                                    value={item.updated}
+                                    onChange={(e) => updateText(activeIdx, item.id, e.target.value)}
+                                    style={styles.textInput}
+                                /> : <textarea
+                                    type="text"
+                                    rows={5}
+                                    value={item.updated}
+                                    onChange={(e) => updateText(activeIdx, item.id, e.target.value)}
+                                    style={styles.textInput} />}
+                            </div>
+                        ))}
                 </div>
 
-                {/* Preview & actions */}
+                {/* Right: Preview */}
                 <div style={styles.previewArea}>
-                    <div style={styles.actionsRow}>
-                        <button
-                            style={styles.primaryBtn}
-                            disabled={!activeTabObj}
-                            onClick={() => activeIdx !== null && saveTabToZip(activeIdx)}
-                        >
-                            <FaSave style={{ marginRight: 8 }} /> Save (into ZIP)
-                        </button>
+                    <button
+                        style={{
+                            ...styles.primaryBtn,
+                            background: "#28a745",
+                            borderColor: "#23823a",
+                            position: "absolute",
+                            zIndex: 10,
+                            top: 20,
+                            right: 20,
+                        }}
+                        disabled={!activeTabObj}
+                        onClick={() => exportActiveTab(activeIdx)}
+                    >
+                        <FaDownload style={{ marginRight: 8 }} /> Export
+                    </button>
 
-                        <button
-                            style={{ ...styles.primaryBtn, background: "#28a745", borderColor: "#23823a" }}
-                            disabled={!activeTabObj}
-                            onClick={() => activeIdx !== null && exportActiveTab(activeIdx)}
-                        >
-                            <FaDownload style={{ marginRight: 8 }} /> Export Tab
-                        </button>
-                    </div>
-
-                    <div style={styles.previewBox}>
+                    <div className="previewBoxRef" style={styles.previewBox}>
                         {activeTabObj ? (
                             <div
+                                id="scaledPreview"
+                                style={{
+                                    transformOrigin: "top left",
+                                    width: "fit-content",
+                                    height: "fit-content",
+                                }}
                                 dangerouslySetInnerHTML={{ __html: activeTabObj.previewHtml }}
-                                style={{ width: "100%" }}
                             />
                         ) : (
-                            <div style={{ color: "#777" }}>No preview — select a tab</div>
+                            "No preview"
                         )}
                     </div>
+
                 </div>
             </div>
         </div>
     );
 }
+
+
+/* ------------------ MODAL STYLES ------------------ */
+
+const modalOverlay = {
+    position: "fixed",
+    top: 0,
+    left: 0,
+    width: "100vw",
+    height: "100vh",
+    background: "rgba(0,0,0,0.55)",
+    display: "flex",
+    justifyContent: "center",
+    alignItems: "center",
+    zIndex: 9999,
+};
+
+const modalBox = {
+    position: "relative",
+    width: 400,
+    background: "#fff",
+    padding: 36,
+    borderRadius: 12,
+    boxShadow: "0 4px 18px rgba(0,0,0,0.2)",
+    overflow: "hidden",
+    animation: "fadeIn 0.2s ease",
+};
+
+const modalHeader = {
+    margin: "16px 0px",
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "center",
+};
+
+const modalBody = {
+    position: "relative",
+    marginTop: 20,
+    display: "flex",
+    flexDirection: "column",
+    gap: 12,
+};
+
+const modalLabel = {
+    fontWeight: 600,
+    fontSize: 14,
+};
+
+const modalInput = {
+    width: "80%",
+    padding: "10px",
+    borderRadius: 8,
+    border: "1px solid #ccc",
+    fontSize: 14,
+    outline: "none",
+};
+
+const modalFooter = {
+    marginTop: 22,
+    display: "flex",
+    justifyContent: "flex-start",
+    gap: 10,
+};
+
+const modalBtnPrimaryAlert = {
+    padding: "8px 18px",
+    width: "100%",
+    height: 36,
+    background: "#1e88ff",
+    color: "white",
+    border: "none",
+    borderRadius: 8,
+    cursor: "pointer",
+    fontWeight: 600,
+}
+
+const modalBtnPrimary = {
+    padding: "8px 18px",
+    width: "45%",
+    height: 36,
+    background: "#1e88ff",
+    color: "white",
+    border: "none",
+    borderRadius: 8,
+    cursor: "pointer",
+    fontWeight: 600,
+};
+
+const modalBtnSecondary = {
+    padding: "8px 18px",
+    background: "#e9ecef",
+    color: "#333",
+    width: "45%",
+    height: 36,
+    border: "none",
+    borderRadius: 8,
+    cursor: "pointer",
+};
+
+const modalClose = {
+    position: "absolute",
+    top: 16,
+    right: 16,
+    cursor: "pointer",
+    fontSize: 28,
+    color: "#666",
+};

@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from "react";
 import JSZip from "jszip";
-import { FaPlus, FaSave, FaDownload, FaTimes, FaRegFileAlt } from "react-icons/fa";
+import { FaPlus, FaDownload, FaTimes, FaRegFileAlt } from "react-icons/fa";
 import styles from "../Styles/home";
 
 export default function ZipHtmlEditor() {

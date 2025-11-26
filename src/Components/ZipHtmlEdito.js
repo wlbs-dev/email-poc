@@ -272,6 +272,9 @@ export default function ZipHtmlEditor() {
     // ---------- UI ----------
     return (
         <div style={styles.container}>
+            <div style={styles.logo}>
+                <img src="/logo.png" alt="Logo" style={{ height: 140 }} />
+            </div>
             {/* Header */}
             <div style={styles.header}>
                 <div style={{ display: "flex", gap: 10, alignItems: "center" }}>

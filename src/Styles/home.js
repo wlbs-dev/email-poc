@@ -115,6 +115,11 @@ const styles = {
     overflow: "auto",
     border: "1px solid #e6eef9",
   },
+  logo: {
+    position: "absolute",
+    bottom: 20,
+    left: 20,
+  },
 };
 
 export default styles

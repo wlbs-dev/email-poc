@@ -63,23 +63,6 @@ export default function ZipHtmlEditor() {
         setActiveIdx(null);
     };
 
-    // helper: normalize path relative to htmlDir (kept identical to your logic)
-    const normalizePathWithHtmlDir = (htmlDir, src) => {
-        if (!src) return src;
-        let normalized = src.replace(/^\.\//, "");
-        if (htmlDir) {
-            const combined = htmlDir + "/" + normalized;
-            const parts = combined.split("/");
-            const clean = [];
-            for (let p of parts) {
-                if (p === "..") clean.pop();
-                else if (p !== ".") clean.push(p);
-            }
-            normalized = clean.join("/");
-        }
-        return normalized;
-    };
-
     // ------------------ 3. Create Tab (clone original HTML + apply image preview logic exactly) ------------------
     const createTab = () => {
         if (!selectedFile) {

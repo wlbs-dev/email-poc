@@ -335,6 +335,7 @@ export default function ZipHtmlEditor() {
 
     // ------------------ 8. Save Session ZIP ------------------
 
+    // ------------------ SAVE COMPLETE SESSION ------------------
     const saveSessionZip = async () => {
         if (!zip) {
             openAlert("No session to save. Upload a ZIP first.");
@@ -343,34 +344,38 @@ export default function ZipHtmlEditor() {
 
         const sessionZip = new JSZip();
 
-        // Save main HTML zip
+        // 1️⃣ Save all HTML files + assets from current ZIP
         const mainBlob = await zip.generateAsync({ type: "blob" });
         sessionZip.file("main.zip", mainBlob);
 
-        // Save session state
+        // 2️⃣ Prepare session state
         const sessionState = {
             selectedFile,
             activeIdx,
             htmlFiles,
-            tabs: tabs.map(t => ({
-                id: t.id,
-                name: t.name,
-                textNodes: t.textNodes.map(n => ({
+            tabs: tabs.map((tab) => ({
+                id: tab.id,
+                name: tab.name,
+                textNodes: tab.textNodes.map((n) => ({
                     id: n.id,
                     original: n.original,
-                    updated: n.updated
-                }))
-            }))
+                    updated: n.updated,
+                })),
+            })),
         };
 
         sessionZip.file("session.json", JSON.stringify(sessionState, null, 2));
 
+        // 3️⃣ Generate final ZIP
         const finalBlob = await sessionZip.generateAsync({ type: "blob" });
         const a = document.createElement("a");
         a.href = URL.createObjectURL(finalBlob);
         a.download = "session.zip";
         a.click();
+
+        openAlert("Session exported successfully!");
     };
+
 
     // ------------------ 9. Import Session ------------------
 
@@ -384,7 +389,7 @@ export default function ZipHtmlEditor() {
 
         const sessionZip = await JSZip.loadAsync(file);
 
-        // ---------- 1. Load main.zip ----------
+        // 1️⃣ Load main.zip
         const mainZipFile = sessionZip.file("main.zip");
         if (!mainZipFile) {
             openAlert("Invalid session file — missing main.zip");
@@ -395,7 +400,7 @@ export default function ZipHtmlEditor() {
         const jszip = await JSZip.loadAsync(mainBlob);
         setZip(jszip);
 
-        // ---------- 2. Restore images EXACTLY like original upload ----------
+        // 2️⃣ Restore images
         const foundHtml = [];
         const imgMap = {};
         const imagePromises = [];
@@ -407,10 +412,8 @@ export default function ZipHtmlEditor() {
                 imagePromises.push(
                     fileRef.async("blob").then((blob) => {
                         const blobUrl = URL.createObjectURL(blob);
-
                         const normalized = path.replace(/^\/+/, "");
                         const basename = normalized.split("/").pop();
-
                         imgMap[path] = blobUrl;
                         imgMap[normalized] = blobUrl;
                         imgMap[basename] = blobUrl;
@@ -425,7 +428,7 @@ export default function ZipHtmlEditor() {
         imageMap.current = imgMap;
         setHtmlFiles(foundHtml);
 
-        // ---------- 3. Load session.json ----------
+        // 3️⃣ Load session.json
         const sessionJsonFile = sessionZip.file("session.json");
         if (!sessionJsonFile) {
             openAlert("Invalid session file — missing session.json");
@@ -433,126 +436,85 @@ export default function ZipHtmlEditor() {
         }
 
         const sessionData = JSON.parse(await sessionJsonFile.async("text"));
-
         setSelectedFile(sessionData.selectedFile);
         setActiveIdx(sessionData.activeIdx);
 
-        // ---------- 4. REBUILD tabs with correct preview ----------
+        // 4️⃣ **Load HTML for selectedFile into rawHtmlRef**
+        if (sessionData.selectedFile) {
+            const fileRef = jszip.file(sessionData.selectedFile);
+            if (fileRef) {
+                rawHtmlRef.current = await fileRef.async("text");
+            }
+        }
+
+        // 5️⃣ Rebuild tabs
         const reconstructedTabs = [];
 
         const resolveImgSrc = (htmlFilePath, src) => {
             if (!src) return null;
-
             let clean = src.split("?")[0].split("#")[0];
-
             if (/^https?:\/\//i.test(clean)) return null;
             if (clean.startsWith("blob:")) return null;
-
-            const candidates = [];
-
-            candidates.push(clean);
-            candidates.push(clean.replace(/^\.\//, ""));
-            candidates.push("./" + clean.replace(/^\.\//, ""));
-
+            const candidates = [clean, clean.replace(/^\.\//, ""), "./" + clean.replace(/^\.\//, "")];
             const basename = clean.split("/").pop();
-            candidates.push(basename);
-            candidates.push("./" + basename);
-
+            candidates.push(basename, "./" + basename);
             if (htmlFilePath && htmlFilePath.includes("/")) {
                 const baseDir = htmlFilePath.substring(0, htmlFilePath.lastIndexOf("/") + 1);
-                candidates.push(baseDir + clean);
-                candidates.push(baseDir + clean.replace(/^\.\//, ""));
-                candidates.push(baseDir + basename);
+                candidates.push(baseDir + clean, baseDir + clean.replace(/^\.\//, ""), baseDir + basename);
             }
-
             const normalizedCandidates = candidates.map(c => c.replace(/^\/+/, ""));
-
             for (const c of normalizedCandidates) {
                 if (imageMap.current[c]) return imageMap.current[c];
                 if (imageMap.current["/" + c]) return imageMap.current["/" + c];
                 if (imageMap.current["./" + c]) return imageMap.current["./" + c];
             }
-
             return null;
         };
 
-        // Loop through saved tabs
         for (const savedTab of sessionData.tabs) {
             const fileRef = jszip.file(sessionData.selectedFile);
             if (!fileRef) continue;
-
             const htmlText = await fileRef.async("text");
-
             const parser = new DOMParser();
             const doc = parser.parseFromString(htmlText, "text/html");
 
-            // ---------- FIX: Build lookup map to avoid .find() ----------
             const savedNodeMap = new Map();
-            for (const n of savedTab.textNodes || []) {
-                savedNodeMap.set(n.id, n);
-            }
+            for (const n of savedTab.textNodes || []) savedNodeMap.set(n.id, n);
 
-            // ---- Restore text nodes ----
             let idCounter = 1;
             const extracted = [];
-
-            const walker = document.createTreeWalker(
-                doc.body,
-                NodeFilter.SHOW_TEXT,
-                {
-                    acceptNode(node) {
-                        return node.textContent.trim().length
-                            ? NodeFilter.FILTER_ACCEPT
-                            : NodeFilter.FILTER_REJECT;
-                    },
-                }
-            );
+            const walker = document.createTreeWalker(doc.body, NodeFilter.SHOW_TEXT, {
+                acceptNode(node) {
+                    return node.textContent.trim() ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT;
+                },
+            });
 
             let node;
             while ((node = walker.nextNode())) {
                 const originalText = node.textContent;
-
-                // FAST lookup — no closure, no warning
                 const saved = savedNodeMap.get(idCounter);
-
                 const updatedText = saved ? saved.updated : originalText;
                 node.textContent = updatedText;
 
-                extracted.push({
-                    id: idCounter,
-                    original: originalText,
-                    updated: updatedText,
-                    nodeRef: node,
-                });
-
+                extracted.push({ id: idCounter, original: originalText, updated: updatedText, nodeRef: node });
                 idCounter++;
             }
 
-            // ---- Fix images for preview but KEEP ORIGINAL PATH ----
             const imgs = doc.querySelectorAll("img");
             imgs.forEach(img => {
                 const originalSrc = img.getAttribute("src") || "";
-
-                if (!img.hasAttribute("data-original-src")) {
-                    img.setAttribute("data-original-src", originalSrc);
-                }
-
+                if (!img.hasAttribute("data-original-src")) img.setAttribute("data-original-src", originalSrc);
                 const resolved = resolveImgSrc(sessionData.selectedFile, originalSrc);
                 if (resolved) img.setAttribute("src", resolved);
             });
 
-            reconstructedTabs.push({
-                id: savedTab.id,
-                name: savedTab.name,
-                textNodes: extracted,
-                doc,
-                previewHtml: doc.body.innerHTML
-            });
+            reconstructedTabs.push({ id: savedTab.id, name: savedTab.name, textNodes: extracted, doc, previewHtml: doc.body.innerHTML });
         }
 
         setTabs(reconstructedTabs);
         openAlert("Session restored successfully!");
     };
+
 
 
 

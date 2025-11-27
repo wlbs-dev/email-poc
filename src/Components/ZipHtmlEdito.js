@@ -1,9 +1,23 @@
-import React, { useState, useRef } from "react";
+import React, { useState, useRef, useEffect } from "react";
 import JSZip from "jszip";
 import { FaPlus, FaDownload, FaTimes, FaRegFileAlt } from "react-icons/fa";
 import styles from "../Styles/home";
 
 export default function ZipHtmlEditor() {
+    useEffect(() => {
+        document.title = "Zip HTML Editor";
+
+        const handleBeforeUnload = (e) => {
+            e.preventDefault();
+            e.returnValue = ""; // required for Chrome
+        };
+
+        window.addEventListener("beforeunload", handleBeforeUnload);
+
+        return () => {
+            window.removeEventListener("beforeunload", handleBeforeUnload);
+        };
+    }, []);
     const [zip, setZip] = useState(null);
     const [htmlFiles, setHtmlFiles] = useState([]);
     const [selectedFile, setSelectedFile] = useState(null);

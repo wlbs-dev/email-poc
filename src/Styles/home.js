@@ -128,7 +128,6 @@ const styles = {
     border: "1px solid #e6eef9",
     display: "flex",
     justifyContent: "center",
-    alignItems: "center",
   },
   logo: {
     position: "absolute",

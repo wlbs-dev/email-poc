@@ -333,6 +333,224 @@ export default function ZipHtmlEditor() {
     const activeTabObj = activeIdx !== null && tabs[activeIdx] ? tabs[activeIdx] : null;
 
 
+    // ------------------ 8. Save Session ZIP ------------------
+
+    const saveSessionZip = async () => {
+        if (!zip) {
+            openAlert("No session to save. Upload a ZIP first.");
+            return;
+        }
+
+        const sessionZip = new JSZip();
+
+        // Save main HTML zip
+        const mainBlob = await zip.generateAsync({ type: "blob" });
+        sessionZip.file("main.zip", mainBlob);
+
+        // Save session state
+        const sessionState = {
+            selectedFile,
+            activeIdx,
+            htmlFiles,
+            tabs: tabs.map(t => ({
+                id: t.id,
+                name: t.name,
+                textNodes: t.textNodes.map(n => ({
+                    id: n.id,
+                    original: n.original,
+                    updated: n.updated
+                }))
+            }))
+        };
+
+        sessionZip.file("session.json", JSON.stringify(sessionState, null, 2));
+
+        const finalBlob = await sessionZip.generateAsync({ type: "blob" });
+        const a = document.createElement("a");
+        a.href = URL.createObjectURL(finalBlob);
+        a.download = "session.zip";
+        a.click();
+    };
+
+    // ------------------ 9. Import Session ------------------
+
+    const importSessionClick = () => {
+        document.getElementById("sessionImporter").click();
+    };
+
+    const handleImportSession = async (e) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
+
+        const sessionZip = await JSZip.loadAsync(file);
+
+        // ---------- 1. Load main.zip ----------
+        const mainZipFile = sessionZip.file("main.zip");
+        if (!mainZipFile) {
+            openAlert("Invalid session file — missing main.zip");
+            return;
+        }
+
+        const mainBlob = await mainZipFile.async("blob");
+        const jszip = await JSZip.loadAsync(mainBlob);
+        setZip(jszip);
+
+        // ---------- 2. Restore images EXACTLY like original upload ----------
+        const foundHtml = [];
+        const imgMap = {};
+        const imagePromises = [];
+
+        jszip.forEach((path, fileRef) => {
+            if (path.endsWith(".html")) foundHtml.push(path);
+
+            if (/\.(png|jpg|jpeg|gif|svg|webp)$/i.test(path)) {
+                imagePromises.push(
+                    fileRef.async("blob").then((blob) => {
+                        const blobUrl = URL.createObjectURL(blob);
+
+                        const normalized = path.replace(/^\/+/, "");
+                        const basename = normalized.split("/").pop();
+
+                        // multiple lookup variants
+                        imgMap[path] = blobUrl;
+                        imgMap[normalized] = blobUrl;
+                        imgMap[basename] = blobUrl;
+                        imgMap["./" + basename] = blobUrl;
+                        imgMap["/" + normalized] = blobUrl;
+                    })
+                );
+            }
+        });
+
+        await Promise.all(imagePromises);
+        imageMap.current = imgMap;
+        setHtmlFiles(foundHtml);
+
+        // ---------- 3. Load session.json ----------
+        const sessionJsonFile = sessionZip.file("session.json");
+        if (!sessionJsonFile) {
+            openAlert("Invalid session file — missing session.json");
+            return;
+        }
+
+        const sessionData = JSON.parse(await sessionJsonFile.async("text"));
+
+        setSelectedFile(sessionData.selectedFile);
+        setActiveIdx(sessionData.activeIdx);
+
+        // ---------- 4. REBUILD tabs with correct preview ----------
+        const reconstructedTabs = [];
+
+        const resolveImgSrc = (htmlFilePath, src) => {
+            if (!src) return null;
+
+            let clean = src.split("?")[0].split("#")[0];
+
+            if (/^https?:\/\//i.test(clean)) return null;
+            if (clean.startsWith("blob:")) return null;
+
+            const candidates = [];
+
+            candidates.push(clean);
+            candidates.push(clean.replace(/^\.\//, ""));
+            candidates.push("./" + clean.replace(/^\.\//, ""));
+
+            const basename = clean.split("/").pop();
+            candidates.push(basename);
+            candidates.push("./" + basename);
+
+            if (htmlFilePath && htmlFilePath.includes("/")) {
+                const baseDir = htmlFilePath.substring(0, htmlFilePath.lastIndexOf("/") + 1);
+                candidates.push(baseDir + clean);
+                candidates.push(baseDir + clean.replace(/^\.\//, ""));
+                candidates.push(baseDir + basename);
+            }
+
+            const normalizedCandidates = candidates.map(c => c.replace(/^\/+/, ""));
+
+            for (const c of normalizedCandidates) {
+                if (imageMap.current[c]) return imageMap.current[c];
+                if (imageMap.current["/" + c]) return imageMap.current["/" + c];
+                if (imageMap.current["./" + c]) return imageMap.current["./" + c];
+            }
+
+            return null;
+        };
+
+        // Loop through saved tabs
+        for (const savedTab of sessionData.tabs) {
+            const fileRef = jszip.file(sessionData.selectedFile);
+            if (!fileRef) continue;
+
+            const htmlText = await fileRef.async("text");
+
+            const parser = new DOMParser();
+            const doc = parser.parseFromString(htmlText, "text/html");
+
+            // ---- Restore text nodes ----
+            let idCounter = 1;
+            const extracted = [];
+
+            const walker = document.createTreeWalker(
+                doc.body,
+                NodeFilter.SHOW_TEXT,
+                {
+                    acceptNode(node) {
+                        return node.textContent.trim().length
+                            ? NodeFilter.FILTER_ACCEPT
+                            : NodeFilter.FILTER_REJECT;
+                    },
+                }
+            );
+
+            let node;
+            while ((node = walker.nextNode())) {
+                const originalText = node.textContent;
+                const saved = savedTab.textNodes.find(n => n.id === idCounter);
+
+                const updatedText = saved ? saved.updated : originalText;
+                node.textContent = updatedText;
+
+                extracted.push({
+                    id: idCounter,
+                    original: originalText,
+                    updated: updatedText,
+                    nodeRef: node,
+                });
+
+                idCounter++;
+            }
+
+            // ---- Fix images for preview but KEEP ORIGINAL PATH ----
+            const imgs = doc.querySelectorAll("img");
+            imgs.forEach(img => {
+                const originalSrc = img.getAttribute("src") || "";
+
+                // Store original path for export
+                if (!img.hasAttribute("data-original-src")) {
+                    img.setAttribute("data-original-src", originalSrc);
+                }
+
+                // Use resolved blob ONLY for preview
+                const resolved = resolveImgSrc(sessionData.selectedFile, originalSrc);
+                if (resolved) img.setAttribute("src", resolved);
+            });
+
+            reconstructedTabs.push({
+                id: savedTab.id,
+                name: savedTab.name,
+                textNodes: extracted,
+                doc,
+                previewHtml: doc.body.innerHTML
+            });
+        }
+
+        setTabs(reconstructedTabs);
+        openAlert("Session restored successfully!");
+    };
+
+
+
     // ------------------ UI ------------------
     return (
         <div style={styles.container}>
@@ -391,6 +609,21 @@ export default function ZipHtmlEditor() {
                 <button style={styles.primaryBtn} onClick={createTab}>
                     <FaPlus style={{ marginRight: 8 }} /> Add Tab
                 </button>
+                <button style={styles.primaryBtn} onClick={saveSessionZip}>
+                    <FaDownload style={{ marginRight: 8 }} /> Save Session
+                </button>
+
+                <button style={styles.primaryBtn} onClick={importSessionClick}>
+                    <FaPlus style={{ marginRight: 8 }} /> Import Session
+                </button>
+
+                <input
+                    type="file"
+                    accept=".zip"
+                    id="sessionImporter"
+                    style={{ display: "none" }}
+                    onChange={handleImportSession}
+                />
             </div>
 
             <div style={styles.topRow}>

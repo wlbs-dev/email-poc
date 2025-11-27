@@ -411,7 +411,6 @@ export default function ZipHtmlEditor() {
                         const normalized = path.replace(/^\/+/, "");
                         const basename = normalized.split("/").pop();
 
-                        // multiple lookup variants
                         imgMap[path] = blobUrl;
                         imgMap[normalized] = blobUrl;
                         imgMap[basename] = blobUrl;
@@ -487,6 +486,12 @@ export default function ZipHtmlEditor() {
             const parser = new DOMParser();
             const doc = parser.parseFromString(htmlText, "text/html");
 
+            // ---------- FIX: Build lookup map to avoid .find() ----------
+            const savedNodeMap = new Map();
+            for (const n of savedTab.textNodes || []) {
+                savedNodeMap.set(n.id, n);
+            }
+
             // ---- Restore text nodes ----
             let idCounter = 1;
             const extracted = [];
@@ -506,7 +511,9 @@ export default function ZipHtmlEditor() {
             let node;
             while ((node = walker.nextNode())) {
                 const originalText = node.textContent;
-                const saved = savedTab.textNodes.find(n => n.id === idCounter);
+
+                // FAST lookup — no closure, no warning
+                const saved = savedNodeMap.get(idCounter);
 
                 const updatedText = saved ? saved.updated : originalText;
                 node.textContent = updatedText;
@@ -526,12 +533,10 @@ export default function ZipHtmlEditor() {
             imgs.forEach(img => {
                 const originalSrc = img.getAttribute("src") || "";
 
-                // Store original path for export
                 if (!img.hasAttribute("data-original-src")) {
                     img.setAttribute("data-original-src", originalSrc);
                 }
 
-                // Use resolved blob ONLY for preview
                 const resolved = resolveImgSrc(sessionData.selectedFile, originalSrc);
                 if (resolved) img.setAttribute("src", resolved);
             });
@@ -548,6 +553,7 @@ export default function ZipHtmlEditor() {
         setTabs(reconstructedTabs);
         openAlert("Session restored successfully!");
     };
+
 
 
 

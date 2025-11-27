@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from "react";
+import React, { useState, useRef } from "react";
 import JSZip from "jszip";
 import { FaPlus, FaDownload, FaTimes, FaRegFileAlt } from "react-icons/fa";
 import styles from "../Styles/home";
@@ -317,26 +317,6 @@ export default function ZipHtmlEditor() {
     };
 
     const activeTabObj = activeIdx !== null && tabs[activeIdx] ? tabs[activeIdx] : null;
-
-    useEffect(() => {
-        if (!activeTabObj) return;
-
-        const box = document.querySelector(".previewBoxRef");
-        const content = document.getElementById("scaledPreview");
-        if (!box || !content) return;
-
-        // Force browser to render before measuring
-        requestAnimationFrame(() => {
-            const boxW = box.clientWidth;
-            const boxH = box.clientHeight;
-            const contentW = content.scrollWidth;
-            const contentH = content.scrollHeight;
-
-            const scale = Math.min(boxW / contentW, boxH / contentH, 1);
-
-            content.style.transform = `scale(${scale})`;
-        });
-    }, [activeTabObj]);
 
 
     // ------------------ UI ------------------

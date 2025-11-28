@@ -99,32 +99,32 @@ export default function ZipHtmlEditor() {
         setActiveIdx(null);
 
         openAlert(`<div style="
-    background: #f8faff;
-    border: 1px solid #d8e6ff;
-    padding: 16px 20px;
-    border-radius: 10px;
-    font-size: 15px;
-    line-height: 1.5;
-    color: #234;
-    box-shadow: 0 2px 6px rgba(0,0,0,0.05);
-">
-    <div style="
-        font-weight: 600;
-        margin-bottom: 6px;
-        color: #1e88ff;
-        font-size: 16px;
-    ">
-        Loaded HTML File
-    </div>
+            background: #f8faff;
+            border: 1px solid #d8e6ff;
+            padding: 16px 20px;
+            border-radius: 10px;
+            font-size: 15px;
+            line-height: 1.5;
+            color: #234;
+            box-shadow: 0 2px 6px rgba(0,0,0,0.05);
+        ">
+            <div style="
+                font-weight: 600;
+                margin-bottom: 6px;
+                color: #1e88ff;
+                font-size: 16px;
+            ">
+                Loaded HTML File
+            </div>
 
-    <div style="margin-bottom: 8px;">
-        <strong style="color: #333;">${fileName.split("/").pop()}</strong>
-    </div>
+            <div style="margin-bottom: 8px;">
+                <strong style="color: #333;">${fileName.split("/").pop()}</strong>
+            </div>
 
-    <div style="color: #555;">
-        Create tabs to edit text content.
-    </div>
-</div>`);
+            <div style="color: #555;">
+                Create tabs to edit text content.
+            </div>
+        </div>`);
     };
 
     // ------------------ 3. Create Tab ------------------
@@ -515,7 +515,125 @@ export default function ZipHtmlEditor() {
         openAlert("Session restored successfully!");
     };
 
+    // ----------------------Export all tabs as individual HTML files in ZIP----------------------
 
+    const exportAllTabs = async () => {
+        if (!zip || tabs.length === 0 || !selectedFile) {
+            openAlert("Nothing to export");
+            return;
+        }
+
+        const newZip = new JSZip();
+
+        // Extract directory path of original HTML (e.g. "folder/index.html" → "folder/")
+        const originalDir = selectedFile.includes("/")
+            ? selectedFile.substring(0, selectedFile.lastIndexOf("/") + 1)
+            : "";
+
+        // -------------------------------------------------------
+        // 1️⃣ COPY ALL ORIGINAL FILES
+        // -------------------------------------------------------
+        await Promise.all(
+            Object.keys(zip.files).map(async (path) => {
+                const file = zip.files[path];
+                if (!file.dir) {
+                    const content = await file.async("arraybuffer");
+                    newZip.file(path, content);
+                } else {
+                    newZip.folder(path);
+                }
+            })
+        );
+
+        // -------------------------------------------------------
+        // 2️⃣ FOOTER FOR LANGUAGE SWITCH
+        // -------------------------------------------------------
+        const footerHtml = (tabs) => {
+            const links = tabs
+                .map(
+                    (t) => `
+            <button
+                onclick="window.open('${t.name.replace(/[^a-zA-Z0-9_-]/g, "_")}.html','_blank')"
+                style="margin-right:10px;padding:6px 12px;border:1px solid #888;
+                border-radius:6px;background:#f4f4f4;cursor:pointer;"
+            >${t.name}</button>`
+                )
+                .join("");
+
+            return `
+        <footer style="margin-top:40px;border-top:1px solid #ddd;padding-top:20px;">
+            <h3>Switch Language</h3>
+            ${links}
+        </footer>
+    `;
+        };
+
+        // -------------------------------------------------------
+        // 3️⃣ Insert FOOTER before </body>
+        // -------------------------------------------------------
+        const insertFooter = (html, tabs) => {
+            const idx = html.lastIndexOf("</body>");
+            if (idx === -1) return html + footerHtml(tabs);
+            return html.slice(0, idx) + footerHtml(tabs) + html.slice(idx);
+        };
+
+        // -------------------------------------------------------
+        // 4️⃣ FIX IMAGES using data-original-src
+        // -------------------------------------------------------
+        const fixImages = (html) => {
+            const parser = new DOMParser();
+            const doc = parser.parseFromString(html, "text/html");
+
+            doc.querySelectorAll("img").forEach((img) => {
+                const correct = img.getAttribute("data-original-src");
+                if (correct) img.setAttribute("src", correct);
+            });
+
+            return "<!DOCTYPE html>\n" + doc.documentElement.outerHTML;
+        };
+
+        // -------------------------------------------------------
+        // 5️⃣ GET ORIGINAL HTML
+        // -------------------------------------------------------
+        const originalHtmlContent = await zip.file(selectedFile).async("string");
+        const fixedOriginal = fixImages(originalHtmlContent);
+
+        // Save corrected main.html inside SAME directory
+        newZip.file(originalDir + "main.html", insertFooter(fixedOriginal, tabs));
+
+        // -------------------------------------------------------
+        // 6️⃣ EXPORT EACH TAB (place inside SAME DIRECTORY as original HTML)
+        // -------------------------------------------------------
+        tabs.forEach((tab) => {
+            const cleanName = tab.name.replace(/[^a-zA-Z0-9_-]/g, "_");
+
+            const htmlDoc = `
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <meta charset="UTF-8" />
+            <title>${tab.name}</title>
+        </head>
+        <body>
+            ${tab.previewHtml}
+        </body>
+        </html>
+    `;
+
+            const fixedHtml = fixImages(htmlDoc);
+
+            newZip.file(originalDir + `${cleanName}.html`, insertFooter(fixedHtml, tabs));
+        });
+
+        // -------------------------------------------------------
+        // 7️⃣ DOWNLOAD ZIP
+        // -------------------------------------------------------
+        const blob = await newZip.generateAsync({ type: "blob" });
+        const link = document.createElement("a");
+        link.href = URL.createObjectURL(blob);
+        link.download = "exported_all_tabs.zip";
+        link.click();
+    };
 
 
 
@@ -584,6 +702,11 @@ export default function ZipHtmlEditor() {
                 <button style={styles.primaryBtn} onClick={importSessionClick}>
                     <FaPlus style={{ marginRight: 8 }} /> Import Session
                 </button>
+
+                <button onClick={exportAllTabs} style={{ marginLeft: 12 }}>
+                    Export All Tabs
+                </button>
+
 
                 <input
                     type="file"

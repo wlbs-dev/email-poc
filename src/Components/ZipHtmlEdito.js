@@ -703,8 +703,12 @@ export default function ZipHtmlEditor() {
                     <FaPlus style={{ marginRight: 8 }} /> Import Session
                 </button>
 
-                <button onClick={exportAllTabs} style={{ marginLeft: 12 }}>
-                    Export All Tabs
+                <button style={{
+                    ...styles.primaryBtn,
+                    background: "#28a745",
+                    borderColor: "#23823a",
+                }} onClick={exportAllTabs} >
+                    <FaDownload style={{ marginRight: 8 }} /> Export All Tabs
                 </button>
 
 
